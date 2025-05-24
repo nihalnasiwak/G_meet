@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document</title>
+</head>
+<body>
+    
+    <script>
+        const win = window.open("https://meet.google.com/", "_blank");
+const timer = setInterval(() => {
+    try {
+        if (win.closed) {
+            console.log("✅ Detected: Meet tab is closed");
+            clearInterval(timer);
+        } else {
+            console.log("⏳ Meet is still open");
+        }
+    } catch (e) {
+        console.warn("❌ Cross-origin error", e);
+        clearInterval(timer);
+    }
+}, 2000);
+
+    </script>
+</body>
+</html>

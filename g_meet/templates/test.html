@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html>
+<head><title>Window Close Test</title></head>
+<body>
+    <h2>Test: Track Tab Closing</h2>
+    <button id="startMeet">Open Dummy Tab</button>
+
+    <script>
+        document.getElementById("startMeet").addEventListener("click", () => {
+            const dummyWindow = window.open("child.html", "_blank");
+            console.log("✅ Dummy tab opened.");
+
+            const interval = setInterval(() => {
+                if (dummyWindow.closed) {
+                    clearInterval(interval);
+                    console.log("❌ Dummy tab closed!");
+                    // window.location.href = "/call/return/123/";
+                }
+            }, 1000);
+        });
+    </script>
+</body>
+</html>
