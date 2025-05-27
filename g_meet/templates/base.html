@@ -152,19 +152,20 @@
             </div>
 
             <audio id="outgoingRing" src="{% static 'audio/android.mp3' %}" loop></audio>
-            <audio id="incomingRing" src="{% static 'audio/beat.mp3' %}" loop></audio>
+            <audio id="incomingRing" src="{% static 'audio/phone-ringing.mp3' %}" loop></audio>
 
 
         </div>
     </div>
 
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.6/dist/js/bootstrap.bundle.min.js"></script>
-    <!-- Add in your base template or the chat page -->
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.6/dist/js/bootstrap.bundle.min.js"></script>
+<!-- Add in your base template or the chat page -->
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 
 
 <script>
     // ✅ 1. Get recipient ID safely as an integer
+    let timeout = null; 
     const recipientId =parseInt("{{ other_user.id }}");
     console.log('[📞] Recipient ID:', recipientId);
     // ✅ 2. Setup WebSocket for receiver to handle incoming calls
@@ -185,6 +186,43 @@
         console.log('[📩] Incoming call data received:', data);
         console.log('Sender ID:', data.sender_id);
         console.log('Receiver ID:', data.receiver_id);
+        const callStatusSocket = new WebSocket(`ws://${window.location.host}/ws/call-status/`);
+        callStatusSocket.onmessage = function(e) {
+            const data = JSON.parse(e.data);
+            const userId = parseInt("{{ request.user.id }}");
+
+            console.log('[🌐] Call-status WebSocket received:', data);
+            if (data.type === 'call_cancelled' && parseInt(data.recipient_id) === userId) {
+                console.log('[🔔] Call was cancelled for me!');
+
+                // 🔇 Stop any ringing
+                const incomingRing = document.getElementById('incomingRing');
+                if (incomingRing) {
+                    incomingRing.pause();
+                    incomingRing.currentTime = 0;
+                }
+
+                // ❌ Close popup if it's visible
+                if (Swal.isVisible()) {
+                    Swal.close();
+                }
+
+                  if (timeout) clearTimeout(timeout);
+
+                // 🛎️ Notify the user
+                Swal.fire({
+                    icon: 'info',
+                    title: '🚫 Call Cancelled',
+                    text: 'The caller has cancelled the call.',
+                    timer: 3000,
+                });
+            }
+
+        }
+
+        
+
+
         if (data.type === 'call_ring' && data.receiver_id == receiverId) {
             const incomingRing = document.getElementById('incomingRing');
             incomingRing.play().catch(e => console.warn("🔇 Auto-play blocked:", e));
@@ -203,78 +241,79 @@
                 };
             }, 30000); // 30 seconds
       
-        Swal.fire({
-            title: '📞 Incoming Call',
-            text: data.message,
-            icon: 'info',
-            showCancelButton: true,
-            confirmButtonText: 'Join Call',
-            cancelButtonText: 'Ignore',
-        }).then((result) => {
-            incomingRing.pause();
-            incomingRing.currentTime = 0;
+            Swal.fire({
+                title: '📞 Incoming Call',
+                text: data.message,
+                icon: 'info',
+                showCancelButton: true,
+                confirmButtonText: 'Join Call',
+                cancelButtonText: 'Ignore',
+            }).then((result) => {
+                incomingRing.pause();
+                incomingRing.currentTime = 0;
 
-            clearTimeout(timeout);  // 🧹 Always clear timeout once user responds
+                clearTimeout(timeout);  // 🧹 Always clear timeout once user responds
 
-            if (result.isConfirmed) {
-                console.log('[✅] Receiver clicked Join. Notifying sender...');
+                if (result.isConfirmed) {
+                    console.log('[✅] Receiver clicked Join. Notifying sender...');
 
-                const notifySocket = new WebSocket(`ws://${window.location.host}/ws/call-status/`);
+                    const notifySocket = new WebSocket(`ws://${window.location.host}/ws/call-status/`);
 
-                notifySocket.onopen = function() {
-                    console.log('call-status socket connected.');
-                    console.log("sender id", data.sender_id);
-                    console.log("recipient id", parseInt("{{ request.user.id }}"));
-                    console.log("meet link", data.meet_link);
-                    if (notifySocket.readyState === 1) {
-                        console.log("[📡] Notify socket open. Sending message...");
-                        notifySocket.send(JSON.stringify({
-                            type: 'call_accepted',
+                    notifySocket.onopen = function() {
+                        console.log('call-status socket connected.');
+                        console.log("sender id", data.sender_id);
+                        console.log("recipient id", parseInt("{{ request.user.id }}"));
+                        console.log("meet link", data.meet_link);
+                        if (notifySocket.readyState === 1) {
+                            console.log("[📡] Notify socket open. Sending message...");
+                            notifySocket.send(JSON.stringify({
+                                type: 'call_accepted',
+                                sender_id: data.sender_id,
+                                recipient_id: parseInt("{{ request.user.id }}"),
+                                meet_link: data.meet_link,
+                            }));
+                            console.log('[📤] Sent call_accepted with link:', data.meet_link);
+                        } else {
+                            console.warn("[⏳] Notify socket not ready.");
+                        }
+                        console.log('[📤] Sent call_accepted with link:', data.meet_link);
+                    };
+
+                    notifySocket.onerror = function(e) {
+                        console.error('[❌] Notify socket error:', e);
+                    };
+
+                    notifySocket.onclose = function(e) {
+                        console.warn('[❌] Notify socket closed.', e.code, e.reason);
+                    };
+                    let cleanLink = data.meet_link;
+
+                    if (cleanLink.includes('intent://')) {
+                        const match = cleanLink.match(/url=([^;]+)/);
+                        if (match && match[1]) {
+                            cleanLink = decodeURIComponent(match[1]);
+                        }
+                    }
+                    window.open(data.meet_link, '_blank');
+                    //window.location.href = cleanLink;
+                    // 🚀 Redirect receiver to Google Meet
+                    //window.location.href = data.meet_link;
+                } else if (result.dismiss === Swal.DismissReason.cancel) {
+
+                    console.log('[🚫] Receiver declined the call.',result.cancelButtonText);
+                    // ❌ User clicked "Ignore"
+                    console.log('[🚫] Receiver clicked Ignore. Notifying sender...');
+                    const ignoreNotifySocket = new WebSocket(`ws://${window.location.host}/ws/call-status/`);
+                    ignoreNotifySocket.onopen = () => {
+                        ignoreNotifySocket.send(JSON.stringify({
+                            type: 'call_ignored',
                             sender_id: data.sender_id,
                             recipient_id: parseInt("{{ request.user.id }}"),
-                            meet_link: data.meet_link,
                         }));
-                         console.log('[📤] Sent call_accepted with link:', data.meet_link);
-                    } else {
-                        console.warn("[⏳] Notify socket not ready.");
-                    }
-                    console.log('[📤] Sent call_accepted with link:', data.meet_link);
-                };
-
-                notifySocket.onerror = function(e) {
-                    console.error('[❌] Notify socket error:', e);
-                };
-
-                notifySocket.onclose = function(e) {
-                    console.warn('[❌] Notify socket closed.', e.code, e.reason);
-                };
-                let cleanLink = data.meet_link;
-
-                if (cleanLink.includes('intent://')) {
-                    const match = cleanLink.match(/url=([^;]+)/);
-                    if (match && match[1]) {
-                        cleanLink = decodeURIComponent(match[1]);
-                    }
+                    };
                 }
-                window.open(data.meet_link, '_blank');
-                //window.location.href = cleanLink;
-                // 🚀 Redirect receiver to Google Meet
-                //window.location.href = data.meet_link;
-            } else {
-                console.log('[🚫] Receiver declined the call.');
-                // ❌ User clicked "Ignore"
-                console.log('[🚫] Receiver clicked Ignore. Notifying sender...');
-                const ignoreNotifySocket = new WebSocket(`ws://${window.location.host}/ws/call-status/`);
-                ignoreNotifySocket.onopen = () => {
-                    ignoreNotifySocket.send(JSON.stringify({
-                        type: 'call_ignored',
-                        sender_id: data.sender_id,
-                        recipient_id: parseInt("{{ request.user.id }}"),
-                    }));
-                };
-            }
-        });
-    }
+            });
+        }
         console.log('Call Initiated:', data.type);
          // ✅ Also keep the call_initiated (for sender)
         if (data.type === 'call_initiated' && data.sender_id === parseInt("{{ request.user.id }}")) {
@@ -294,6 +333,8 @@
         Swal.fire({
             title: '📞 Calling...',
             text: 'Waiting for receiver to join...',
+            showCancelButton: true,
+            cancelButtonText: 'Cancel Call',
             allowOutsideClick: false,
             allowEscapeKey: false,
             didOpen: () => {
@@ -302,6 +343,23 @@
             willClose: () => {
                 console.log('[❎] Calling modal closed.');
             }
+        }).then((result) => {
+            if (result.dismiss === Swal.DismissReason.cancel) {
+            console.log('[🚫] Sender cancelled the call.');
+
+            outgoingRing.pause();
+            outgoingRing.currentTime = 0;
+
+            const cancelSocket = new WebSocket(`ws://${window.location.host}/ws/call-status/`);
+            cancelSocket.onopen = () => {
+                cancelSocket.send(JSON.stringify({
+                    type: 'call_cancelled',
+                    sender_id: parseInt("{{ request.user.id }}"),
+                    recipient_id: parseInt("{{ other_user.id }}")
+                }));
+            };
+        }
+  
         });
 
         const socket = new WebSocket(`ws://${window.location.host}/ws/call-status/`);
